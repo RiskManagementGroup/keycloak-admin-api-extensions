@@ -646,6 +646,7 @@ public class ApiExtensionsResource {
     }
   }
 
+  // Copied from JpaUserProvider. Added group filtering.
   @SuppressWarnings("unchecked")
   public int getUsersCount(RealmModel realm, Map<String, String> params, Set<String> groupIds) {
     EntityManager em = ((JpaUserProvider) session.getProvider(UserProvider.class)).getEntityManager();
@@ -659,12 +660,14 @@ public class ApiExtensionsResource {
     List<Predicate> restrictions = predicates(params, root, Map.of());
     restrictions.add(cb.equal(root.get("realmId"), realm.getId()));
 
-    Join<UserEntity, UserGroupMembershipEntity> groupMembershipUserJoin = root.join(UserGroupMembershipEntity.class,
-        JoinType.LEFT);
-    groupMembershipUserJoin.on(cb.equal(groupMembershipUserJoin.get("user").get("id"), root.get("id")));
-    Predicate groupPredicate = groupMembershipUserJoin.get("groupId").in(groupIds);
+    if (groupIds != null && !groupIds.isEmpty()) {
+      Join<UserEntity, UserGroupMembershipEntity> groupMembershipUserJoin = root.join(UserGroupMembershipEntity.class,
+          JoinType.LEFT);
+      groupMembershipUserJoin.on(cb.equal(groupMembershipUserJoin.get("user").get("id"), root.get("id")));
+      Predicate groupPredicate = groupMembershipUserJoin.get("groupId").in(groupIds);
 
-    restrictions.add(groupPredicate);
+      restrictions.add(groupPredicate);
+    }
 
     restrictions.addAll(AdminPermissionsSchema.SCHEMA.applyAuthorizationFilters(session, AdminPermissionsSchema.USERS,
         (JpaUserProvider) session.getProvider(UserProvider.class), realm, cb, countQuery, root));
