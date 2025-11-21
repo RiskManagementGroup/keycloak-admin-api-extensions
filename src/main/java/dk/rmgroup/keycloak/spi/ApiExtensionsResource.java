@@ -278,8 +278,7 @@ public class ApiExtensionsResource {
   // Copied from JpaUserProvider. Calls our local predicates method. Had to get
   // entityManager differently
   // Also added sortBy and sortOrder
-  // It no long uses distinct true since we not able to sort on attributes
-  // otherwise. It should not be a problem since we only join left.
+  // I have added group by to get distinct users when joining with attributes
   public Stream<UserModel> searchForUserStream(RealmModel realm, Map<String, String> attributes, Integer firstResult,
       Integer maxResults, String sortBy, String sortOrder) {
     EntityManager em = ((JpaUserProvider) session.getProvider(UserProvider.class)).getEntityManager();
@@ -295,7 +294,8 @@ public class ApiExtensionsResource {
     predicates.addAll(AdminPermissionsSchema.SCHEMA.applyAuthorizationFilters(session, AdminPermissionsSchema.USERS,
         (JpaUserProvider) session.getProvider(UserProvider.class), realm, builder, queryBuilder, root));
 
-    queryBuilder.distinct(false).where(predicates.toArray(Predicate[]::new));
+    // We group by user Id since we want to avoid duplicates of users
+    queryBuilder.distinct(false).where(predicates.toArray(Predicate[]::new)).groupBy(root.get("id"));
 
     if (sortBy == null) {
       queryBuilder.orderBy(builder.asc(root.get(UserModel.USERNAME)));
@@ -303,6 +303,7 @@ public class ApiExtensionsResource {
       jakarta.persistence.criteria.Path<UserEntity> sortPath;
       Join<UserEntity, UserAttributeEntity> attributesJoin = root.join("attributes", JoinType.LEFT);
       attributesJoin.on(builder.equal(attributesJoin.get("name"), sortBy));
+      Boolean isAttribute = false;
 
       switch (sortBy.toLowerCase()) {
         case "firstname":
@@ -318,15 +319,26 @@ public class ApiExtensionsResource {
           sortPath = root.get(UserModel.USERNAME);
           break;
         default:
+          isAttribute = true;
           sortPath = attributesJoin.get("value");
           break;
       }
 
       boolean descending = sortOrder != null && sortOrder.equalsIgnoreCase("desc");
       if (descending) {
-        queryBuilder.orderBy(builder.desc(sortPath));
+        if (isAttribute) {
+          // We use min since we group by user id. It is a bit of a hack, but should work
+          queryBuilder.orderBy(builder.desc(builder.min(attributesJoin.get("value"))));
+        } else {
+          queryBuilder.orderBy(builder.desc(sortPath));
+        }
       } else {
-        queryBuilder.orderBy(builder.asc(sortPath));
+        if (isAttribute) {
+          // We use min since we group by user id. It is a bit of a hack, but should work
+          queryBuilder.orderBy(builder.asc(builder.min(attributesJoin.get("value"))));
+        } else {
+          queryBuilder.orderBy(builder.asc(sortPath));
+        }
       }
     }
 
