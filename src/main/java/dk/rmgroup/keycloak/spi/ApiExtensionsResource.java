@@ -266,7 +266,7 @@ public class ApiExtensionsResource {
     return userModels
         .map(user -> {
           UserProfile profile = provider.create(UserProfileContext.USER_API, user);
-          UserRepresentation rep = profile.toRepresentation();
+          UserRepresentation rep = profile.toRepresentation(!briefRepresentationB);
           UserRepresentation userRep = briefRepresentationB
               ? ModelToRepresentation.toBriefRepresentation(user, rep, false)
               : ModelToRepresentation.toRepresentation(session, realm, user, rep, false);
@@ -295,7 +295,7 @@ public class ApiExtensionsResource {
         (JpaUserProvider) session.getProvider(UserProvider.class), realm, builder, queryBuilder, root));
 
     // We group by user Id since we want to avoid duplicates of users
-    queryBuilder.distinct(false).where(predicates.toArray(Predicate[]::new)).groupBy(root.get("id"));
+    queryBuilder.distinct(false).where(predicates).groupBy(root.get("id"));
 
     if (sortBy == null) {
       queryBuilder.orderBy(builder.asc(root.get(UserModel.USERNAME)));
@@ -375,9 +375,7 @@ public class ApiExtensionsResource {
 
       switch (key) {
         case UserModel.SEARCH:
-          for (String stringToSearch : value.trim().split("\\s+")) {
-            predicates.add(builder.or(getSearchOptionPredicateArray(stringToSearch, builder, root)));
-          }
+          addSearchPredicates(value, builder, root, predicates);
           break;
         case FIRST_NAME:
         case LAST_NAME:
@@ -415,6 +413,13 @@ public class ApiExtensionsResource {
           break;
         case UserModel.EXACT:
           break;
+        case UserModel.INCLUDE_SERVICE_ACCOUNT: {
+          if (!attributes.containsKey(UserModel.INCLUDE_SERVICE_ACCOUNT)
+              || !Boolean.parseBoolean(attributes.get(UserModel.INCLUDE_SERVICE_ACCOUNT))) {
+            predicates.add(root.get("serviceAccountClientLink").isNull());
+          }
+          break;
+        }
         case UserModel.GROUPS:
           if (groupMembershipUserJoin == null) {
             groupMembershipUserJoin = root.join(UserGroupMembershipEntity.class, JoinType.LEFT);
@@ -447,26 +452,29 @@ public class ApiExtensionsResource {
             }
           }
           break;
-        case UserModel.INCLUDE_SERVICE_ACCOUNT: {
-          if (!attributes.containsKey(UserModel.INCLUDE_SERVICE_ACCOUNT)
-              || !Boolean.parseBoolean(attributes.get(UserModel.INCLUDE_SERVICE_ACCOUNT))) {
-            predicates.add(root.get("serviceAccountClientLink").isNull());
-          }
-          break;
-        }
       }
     }
 
     if (!attributePredicates.isEmpty()) {
-      predicates.add(builder.and(attributePredicates.toArray(Predicate[]::new)));
+      predicates.add(builder.and(attributePredicates));
     }
 
     return predicates;
   }
 
   // Copied from JpaUserProvider. Nothing is changed.
-  private Predicate[] getSearchOptionPredicateArray(String value, CriteriaBuilder builder,
-      From<?, UserEntity> from) {
+  private static void addSearchPredicates(String search, CriteriaBuilder builder, From<?, UserEntity> from,
+      List<Predicate> predicates) {
+    if (search == null) {
+      return;
+    }
+    for (String stringToSearch : search.trim().split("\\s+")) {
+      predicates.add(getSearchOptionPredicate(stringToSearch, builder, from));
+    }
+  }
+
+  // Copied from JpaUserProvider. Nothing is changed.
+  private static Predicate getSearchOptionPredicate(String value, CriteriaBuilder builder, From<?, UserEntity> from) {
     value = value.toLowerCase();
 
     List<Predicate> orPredicates = new ArrayList<>();
@@ -491,7 +499,7 @@ public class ApiExtensionsResource {
       orPredicates.add(builder.like(builder.lower(from.get(LAST_NAME)), value, ESCAPE_BACKSLASH));
     }
 
-    return orPredicates.toArray(Predicate[]::new);
+    return builder.or(orPredicates);
   }
 
   /**
@@ -684,7 +692,7 @@ public class ApiExtensionsResource {
     restrictions.addAll(AdminPermissionsSchema.SCHEMA.applyAuthorizationFilters(session, AdminPermissionsSchema.USERS,
         (JpaUserProvider) session.getProvider(UserProvider.class), realm, cb, countQuery, root));
 
-    countQuery.where(restrictions.toArray(Predicate[]::new));
+    countQuery.where(restrictions);
     TypedQuery<Long> query = em.createQuery(countQuery);
     Long result = query.getSingleResult();
 
