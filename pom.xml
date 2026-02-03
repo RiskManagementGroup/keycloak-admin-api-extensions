@@ -5,13 +5,13 @@
 
   <groupId>dk.rmgroup.keycloak</groupId>
   <artifactId>api-extensions</artifactId>
-  <version>26.4.4-2</version>
+  <version>26.5.2</version>
 
   <properties>
     <maven.compiler.source>21</maven.compiler.source>
     <maven.compiler.target>21</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <keycloak.version>26.4.4</keycloak.version>
+    <keycloak.version>26.5.2</keycloak.version>
   </properties>
 
   <dependencyManagement>
