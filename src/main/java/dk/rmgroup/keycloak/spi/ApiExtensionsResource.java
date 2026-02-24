@@ -428,7 +428,7 @@ public class ApiExtensionsResource {
           Collection<String> groupIdsList = new ArrayList<>();
           groupIdsList.addAll(Arrays.asList(value.split(",")));
           Predicate groupPredicate = groupMembershipUserJoin.get("groupId").in(groupIdsList);
-          attributePredicates.add(groupPredicate);
+          predicates.add(groupPredicate);
           break;
 
         // All unknown attributes will be assumed as custom attributes
@@ -473,9 +473,12 @@ public class ApiExtensionsResource {
     }
   }
 
-  // Copied from JpaUserProvider. Nothing is changed.
+  // Copied from JpaUserProvider.
+  // Added search for attributes.
   private static Predicate getSearchOptionPredicate(String value, CriteriaBuilder builder, From<?, UserEntity> from) {
     value = value.toLowerCase();
+
+    Join<UserEntity, UserAttributeEntity> attributesJoin = from.join("attributes", JoinType.LEFT);
 
     List<Predicate> orPredicates = new ArrayList<>();
 
@@ -487,6 +490,7 @@ public class ApiExtensionsResource {
       orPredicates.add(builder.equal(from.get(EMAIL), value));
       orPredicates.add(builder.equal(builder.lower(from.get(FIRST_NAME)), value));
       orPredicates.add(builder.equal(builder.lower(from.get(LAST_NAME)), value));
+      orPredicates.add(builder.equal(builder.lower(attributesJoin.get("value")), value.toLowerCase()));
     } else {
       value = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
       value = value.replace("*", "%");
@@ -497,6 +501,7 @@ public class ApiExtensionsResource {
       orPredicates.add(builder.like(from.get(EMAIL), value, ESCAPE_BACKSLASH));
       orPredicates.add(builder.like(builder.lower(from.get(FIRST_NAME)), value, ESCAPE_BACKSLASH));
       orPredicates.add(builder.like(builder.lower(from.get(LAST_NAME)), value, ESCAPE_BACKSLASH));
+      orPredicates.add(builder.like(builder.lower(attributesJoin.get("value")), "%" + value.toLowerCase() + "%", ESCAPE_BACKSLASH));
     }
 
     return builder.or(orPredicates);
