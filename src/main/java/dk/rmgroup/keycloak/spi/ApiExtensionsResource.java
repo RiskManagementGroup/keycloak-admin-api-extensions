@@ -40,6 +40,7 @@ import org.keycloak.services.resources.KeycloakOpenAPI;
 import org.keycloak.services.resources.admin.AdminEventBuilder;
 import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 import org.keycloak.services.resources.admin.fgap.UserPermissionEvaluator;
+import org.keycloak.services.util.DateUtil;
 import org.keycloak.storage.jpa.JpaHashUtils;
 import static org.keycloak.storage.jpa.JpaHashUtils.predicateForFilteringUsersByAttributes;
 import org.keycloak.userprofile.UserProfile;
@@ -58,6 +59,7 @@ import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -147,6 +149,8 @@ public class ApiExtensionsResource {
       @Parameter(description = "Boolean which defines whether brief representations are returned (default: false)") @QueryParam("briefRepresentation") Boolean briefRepresentation,
       @Parameter(description = "Boolean which defines whether the params \"last\", \"first\", \"email\" and \"username\" must match exactly") @QueryParam("exact") Boolean exact,
       @Parameter(description = "A query to search for custom attributes, in the format 'key1:value2 key2:value2'") @QueryParam("q") String searchQuery,
+      @Parameter(description = "Only return users created after (inclusive) the given date, in ISO-8601 format (yyyy-MM-dd) or epoch milliseconds") @QueryParam("createdAfter") String createdAfter,
+      @Parameter(description = "Only return users created before (inclusive) the given date, in ISO-8601 format (yyyy-MM-dd) or epoch milliseconds") @QueryParam("createdBefore") String createdBefore,
       @Parameter(description = "An array of groupIds to filter on") @QueryParam("groupIds") String groupIds,
       @Parameter(description = "Field to sort by") @QueryParam("sortBy") String sortBy,
       @Parameter(description = "Sort order: asc or desc") @QueryParam("sortOrder") String sortOrder) {
@@ -181,13 +185,14 @@ public class ApiExtensionsResource {
         if (groupIds != null) {
           attributes.put(UserModel.GROUPS, groupIds);
         }
+        addCreatedTimestampConditions(attributes, createdAfter, createdBefore);
 
         return searchForUser(attributes, realm, userPermissionEvaluator, briefRepresentation, firstResult,
             maxResults, false, sortBy, sortOrder);
       }
     } else if (last != null || first != null || email != null || username != null || emailVerified != null
-        || idpAlias != null || idpUserId != null || enabled != null || exact != null || !searchAttributes.isEmpty()
-        || groupIds != null) {
+        || createdAfter != null || createdBefore != null || idpAlias != null || idpUserId != null || enabled != null
+        || exact != null || !searchAttributes.isEmpty() || groupIds != null) {
       Map<String, String> attributes = new HashMap<>();
       if (last != null) {
         attributes.put(UserModel.LAST_NAME, last);
@@ -219,6 +224,7 @@ public class ApiExtensionsResource {
       if (groupIds != null) {
         attributes.put(UserModel.GROUPS, groupIds);
       }
+      addCreatedTimestampConditions(attributes, createdAfter, createdBefore);
 
       attributes.putAll(searchAttributes);
 
@@ -420,6 +426,12 @@ public class ApiExtensionsResource {
           }
           break;
         }
+        case UserModel.CREATED_AFTER:
+          predicates.add(builder.greaterThanOrEqualTo(root.get("createdTimestamp"), Long.parseLong(value)));
+          break;
+        case UserModel.CREATED_BEFORE:
+          predicates.add(builder.lessThanOrEqualTo(root.get("createdTimestamp"), Long.parseLong(value)));
+          break;
         case UserModel.GROUPS:
           if (groupMembershipUserJoin == null) {
             groupMembershipUserJoin = root.join(UserGroupMembershipEntity.class, JoinType.LEFT);
@@ -492,16 +504,18 @@ public class ApiExtensionsResource {
       orPredicates.add(builder.equal(builder.lower(from.get(LAST_NAME)), value));
       orPredicates.add(builder.equal(builder.lower(attributesJoin.get("value")), value.toLowerCase()));
     } else {
+      boolean endsWithWildcard = value.endsWith("*");
       value = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
       value = value.replace("*", "%");
-      if (value.isEmpty() || value.charAt(value.length() - 1) != '%')
+      if (value.isEmpty() || !endsWithWildcard)
         value += "%";
 
       orPredicates.add(builder.like(from.get(USERNAME), value, ESCAPE_BACKSLASH));
       orPredicates.add(builder.like(from.get(EMAIL), value, ESCAPE_BACKSLASH));
       orPredicates.add(builder.like(builder.lower(from.get(FIRST_NAME)), value, ESCAPE_BACKSLASH));
       orPredicates.add(builder.like(builder.lower(from.get(LAST_NAME)), value, ESCAPE_BACKSLASH));
-      orPredicates.add(builder.like(builder.lower(attributesJoin.get("value")), "%" + value.toLowerCase() + "%", ESCAPE_BACKSLASH));
+      orPredicates.add(
+          builder.like(builder.lower(attributesJoin.get("value")), "%" + value.toLowerCase() + "%", ESCAPE_BACKSLASH));
     }
 
     return builder.or(orPredicates);
@@ -573,6 +587,8 @@ public class ApiExtensionsResource {
       @Parameter(description = "Boolean representing if user is enabled or not") @QueryParam("enabled") Boolean enabled,
       @Parameter(description = "Boolean which defines whether the params \"last\", \"first\", \"email\" and \"username\" must match exactly") @QueryParam("exact") Boolean exact,
       @Parameter(description = "A query to search for custom attributes, in the format 'key1:value2 key2:value2'") @QueryParam("q") String searchQuery,
+      @Parameter(description = "Only return users created after (inclusive) the given date, in ISO-8601 format (yyyy-MM-dd) or epoch milliseconds") @QueryParam("createdAfter") String createdAfter,
+      @Parameter(description = "Only return users created before (inclusive) the given date, in ISO-8601 format (yyyy-MM-dd) or epoch milliseconds") @QueryParam("createdBefore") String createdBefore,
       @Parameter(description = "An array of groupIds to filter on") @QueryParam("groupIds") String groupIds) {
     UserPermissionEvaluator userPermissionEvaluator = auth.users();
     userPermissionEvaluator.requireQuery();
@@ -600,6 +616,7 @@ public class ApiExtensionsResource {
       if (emailVerified != null) {
         parameters.put(UserModel.EMAIL_VERIFIED, emailVerified.toString());
       }
+      addCreatedTimestampConditions(parameters, createdAfter, createdBefore);
       // search /users equivalent to this doesn't include service-accounts so counting
       // shouldn't as well
       parameters.put(UserModel.INCLUDE_SERVICE_ACCOUNT, "false");
@@ -613,7 +630,8 @@ public class ApiExtensionsResource {
         }
       }
     } else if (last != null || first != null || email != null || username != null || emailVerified != null
-        || enabled != null || !searchAttributes.isEmpty()) {
+        || idpAlias != null || idpUserId != null || enabled != null || exact != null || !searchAttributes.isEmpty()
+        || createdAfter != null || createdBefore != null) {
       Map<String, String> parameters = new HashMap<>();
       if (last != null) {
         parameters.put(UserModel.LAST_NAME, last);
@@ -642,6 +660,7 @@ public class ApiExtensionsResource {
       if (exact != null) {
         parameters.put(UserModel.EXACT, exact.toString());
       }
+      addCreatedTimestampConditions(parameters, createdAfter, createdBefore);
       parameters.putAll(searchAttributes);
       parameters.put(UserModel.INCLUDE_SERVICE_ACCOUNT, "false");
 
@@ -702,5 +721,26 @@ public class ApiExtensionsResource {
     Long result = query.getSingleResult();
 
     return result.intValue();
+  }
+
+  // Copied from UsersResource. Nothing is changed.
+  private static void addCreatedTimestampConditions(Map<String, String> attributes, String createdAfter,
+      String createdBefore) {
+    if (createdAfter != null) {
+      try {
+        attributes.put(UserModel.CREATED_AFTER, String.valueOf(DateUtil.toStartOfDay(createdAfter)));
+      } catch (Throwable t) {
+        throw new BadRequestException(
+            "Invalid value for 'createdAfter', expected format is yyyy-MM-dd or an Epoch timestamp");
+      }
+    }
+    if (createdBefore != null) {
+      try {
+        attributes.put(UserModel.CREATED_BEFORE, String.valueOf(DateUtil.toEndOfDay(createdBefore)));
+      } catch (Throwable t) {
+        throw new BadRequestException(
+            "Invalid value for 'createdBefore', expected format is yyyy-MM-dd or an Epoch timestamp");
+      }
+    }
   }
 }
