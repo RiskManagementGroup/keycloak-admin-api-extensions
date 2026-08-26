@@ -167,9 +167,11 @@ public class ApiExtensionsResource {
 
     Stream<UserModel> userModels;
     if (search != null) {
-      if (search.startsWith(SEARCH_ID_PARAMETER)) {
-        String[] userIds = search.substring(SEARCH_ID_PARAMETER.length()).trim().split("\\s+");
-        userModels = Arrays.stream(userIds).map(id -> session.users().getUserById(realm, id)).filter(Objects::nonNull);
+      SearchQueryUtils.UserSearchPrefix prefix = SearchQueryUtils.UserSearchPrefix.matching(search);
+      if (prefix != null) {
+        userModels = Arrays.stream(prefix.splitTerms(search))
+            .map(term -> prefix.lookup(session.users(), realm, term))
+            .filter(Objects::nonNull);
         if (AdminPermissionsSchema.SCHEMA.isAdminPermissionsEnabled(realm)) {
           userModels = userModels.filter(userPermissionEvaluator::canView);
         }
@@ -259,7 +261,7 @@ public class ApiExtensionsResource {
   // Copied from UsersResource. No difference
   private Stream<UserRepresentation> toRepresentation(RealmModel realm, UserPermissionEvaluator usersEvaluator,
       Boolean briefRepresentation, Stream<UserModel> userModels) {
-    boolean briefRepresentationB = briefRepresentation != null && briefRepresentation;
+    boolean briefRep = Boolean.TRUE.equals(briefRepresentation);
 
     if (!AdminPermissionsSchema.SCHEMA.isAdminPermissionsEnabled(realm)) {
       usersEvaluator.grantIfNoPermission(session.getAttribute(UserModel.GROUPS) != null);
@@ -267,15 +269,9 @@ public class ApiExtensionsResource {
       usersEvaluator.grantIfNoPermission(session.getAttribute(UserModel.GROUPS) != null);
     }
 
-    UserProfileProvider provider = session.getProvider(UserProfileProvider.class);
-
     return userModels
         .map(user -> {
-          UserProfile profile = provider.create(UserProfileContext.USER_API, user);
-          UserRepresentation rep = profile.toRepresentation(!briefRepresentationB);
-          UserRepresentation userRep = briefRepresentationB
-              ? ModelToRepresentation.toBriefRepresentation(user, rep, false)
-              : ModelToRepresentation.toRepresentation(session, realm, user, rep, false);
+          UserRepresentation userRep = ModelToRepresentation.toRepresentation(session, user, briefRep);
           userRep.setAccess(usersEvaluator.getAccessForListing(user));
           return userRep;
         });
@@ -602,9 +598,13 @@ public class ApiExtensionsResource {
         ? Collections.emptyMap()
         : SearchQueryUtils.getFields(searchQuery);
     if (search != null) {
-      if (search.startsWith(SEARCH_ID_PARAMETER)) {
-        UserModel userModel = session.users().getUserById(realm, search.substring(SEARCH_ID_PARAMETER.length()).trim());
-        return userModel != null && userPermissionEvaluator.canView(userModel) ? 1 : 0;
+      SearchQueryUtils.UserSearchPrefix prefix = SearchQueryUtils.UserSearchPrefix.matching(search);
+      if (prefix != null) {
+        return (int) Arrays.stream(prefix.splitTerms(search))
+            .map(term -> prefix.lookup(session.users(), realm, term))
+            .filter(Objects::nonNull)
+            .filter(userPermissionEvaluator::canView)
+            .count();
       }
 
       Map<String, String> parameters = new HashMap<>();
