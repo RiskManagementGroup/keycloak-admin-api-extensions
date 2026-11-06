@@ -254,8 +254,8 @@ public class ApiExtensionsResource {
       }
     }
 
-    return toRepresentation(realm, usersEvaluator, briefRepresentation,
-        searchForUserStream(realm, attributes, firstResult, maxResults, sortBy, sortOrder));
+    return session.runAsReadOnly(() -> toRepresentation(realm, usersEvaluator, briefRepresentation,
+        searchForUserStream(realm, attributes, firstResult, maxResults, sortBy, sortOrder)));
   }
 
   // Copied from UsersResource. No difference
